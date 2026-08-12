@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { questions } from './data/questions'
-import { checkAnswer } from './utils/checkAnswer'
+import { useState } from 'react'
+import { questions, type Choice, type Question } from './data/questions'
 import './App.css'
 
 type Phase = 'welcome' | 'answering' | 'feedback' | 'results'
@@ -8,43 +7,53 @@ type Phase = 'welcome' | 'answering' | 'feedback' | 'results'
 type Result = {
   questionId: number
   correct: boolean
-  userAnswer: string
+  selected: Choice
+}
+
+const CHOICES: Choice[] = ['A', 'B', 'C', 'D']
+
+function shuffleQuestions(list: Question[]): Question[] {
+  const next = [...list]
+  for (let i = next.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[next[i], next[j]] = [next[j], next[i]]
+  }
+  return next
 }
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>('welcome')
+  const [deck, setDeck] = useState<Question[]>([])
   const [index, setIndex] = useState(0)
-  const [draft, setDraft] = useState('')
+  const [selected, setSelected] = useState<Choice | null>(null)
   const [lastCorrect, setLastCorrect] = useState(false)
   const [results, setResults] = useState<Result[]>([])
-  const inputRef = useRef<HTMLTextAreaElement>(null)
 
-  const question = questions[index]
-  const total = questions.length
+  const question = deck[index]
+  const total = deck.length || questions.length
   const score = results.filter((r) => r.correct).length
-  const progress = phase === 'welcome' ? 0 : Math.min(((index + (phase === 'feedback' || phase === 'results' ? 1 : 0)) / total) * 100, 100)
-
-  useEffect(() => {
-    if (phase === 'answering') {
-      inputRef.current?.focus()
-    }
-  }, [phase, index])
+  const progress =
+    phase === 'welcome'
+      ? 0
+      : Math.min(((index + (phase === 'feedback' || phase === 'results' ? 1 : 0)) / total) * 100, 100)
 
   function startQuiz() {
+    setDeck(shuffleQuestions(questions))
     setPhase('answering')
     setIndex(0)
-    setDraft('')
+    setSelected(null)
     setResults([])
     setLastCorrect(false)
   }
 
-  function submitAnswer() {
-    if (!draft.trim()) return
-    const correct = checkAnswer(question, draft)
+  function chooseOption(choice: Choice) {
+    if (phase !== 'answering' || !question) return
+    const correct = choice === question.correct
+    setSelected(choice)
     setLastCorrect(correct)
     setResults((prev) => [
       ...prev,
-      { questionId: question.id, correct, userAnswer: draft.trim() },
+      { questionId: question.id, correct, selected: choice },
     ])
     setPhase('feedback')
   }
@@ -55,16 +64,8 @@ export default function App() {
       return
     }
     setIndex((i) => i + 1)
-    setDraft('')
+    setSelected(null)
     setPhase('answering')
-  }
-
-  function onKeyDown(e: { key: string; shiftKey: boolean; preventDefault: () => void }) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      if (phase === 'answering') submitAnswer()
-      else if (phase === 'feedback') goNext()
-    }
   }
 
   return (
@@ -108,73 +109,67 @@ export default function App() {
               <span className="hero-brand">Ocean Quest</span>
             </h1>
             <p className="hero-lead">
-              Type your answer for each question. After you continue, you’ll see whether you were right — and the fact behind it.
+              Choose the best answer for each multiple-choice question. After you pick, you’ll see whether you were right — and the fact behind it. Questions appear in a new random order every time.
             </p>
             <div className="cta-row">
               <button type="button" className="btn btn-primary" onClick={startQuiz}>
                 Begin quiz
               </button>
-              <p className="cta-note">{total} questions · typed answers</p>
+              <p className="cta-note">{questions.length} MCQs · shuffled each run</p>
             </div>
           </section>
         )}
 
         {(phase === 'answering' || phase === 'feedback') && question && (
-          <section className="quiz panel-enter" key={`${question.id}-${phase}`}>
-            <p className="q-label">Question {question.id}</p>
+          <section className="quiz panel-enter" key={`${question.id}-${phase === 'feedback' ? 'fb' : 'q'}`}>
+            <p className="q-label">
+              Question {index + 1}
+              <span className="q-bank-id"> · bank #{question.id}</span>
+            </p>
             <h2 className="q-text">{question.question}</h2>
 
-            {phase === 'answering' && (
-              <div className="answer-block">
-                <label className="sr-only" htmlFor="answer">
-                  Your answer
-                </label>
-                <textarea
-                  id="answer"
-                  ref={inputRef}
-                  className="answer-input"
-                  rows={3}
-                  placeholder="Type your answer here…"
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={onKeyDown}
-                  autoComplete="off"
-                  spellCheck
-                />
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={submitAnswer}
-                  disabled={!draft.trim()}
-                >
-                  Next
-                </button>
-              </div>
-            )}
+            <div className="options" role="group" aria-label="Answer choices">
+              {CHOICES.map((choice) => {
+                const isSelected = selected === choice
+                const isCorrectChoice = choice === question.correct
+                let stateClass = ''
+                if (phase === 'feedback') {
+                  if (isCorrectChoice) stateClass = 'is-correct-option'
+                  else if (isSelected) stateClass = 'is-wrong-option'
+                  else stateClass = 'is-muted'
+                }
+
+                return (
+                  <button
+                    key={choice}
+                    type="button"
+                    className={`option ${stateClass}`}
+                    onClick={() => chooseOption(choice)}
+                    disabled={phase === 'feedback'}
+                    aria-pressed={isSelected}
+                  >
+                    <span className="option-key">{choice}</span>
+                    <span className="option-text">{question.options[choice]}</span>
+                  </button>
+                )
+              })}
+            </div>
 
             {phase === 'feedback' && (
               <div className={`feedback ${lastCorrect ? 'is-correct' : 'is-wrong'}`}>
                 <div className="feedback-banner">
                   <span className="feedback-badge">{lastCorrect ? 'Correct' : 'Incorrect'}</span>
-                  {!lastCorrect && (
-                    <p className="expected">
-                      <span className="expected-label">Expected answer</span>
-                      {question.answer}
-                    </p>
-                  )}
-                  {lastCorrect && (
-                    <p className="expected expected-ok">
-                      <span className="expected-label">Model answer</span>
-                      {question.answer}
-                    </p>
-                  )}
+                  <p className="expected">
+                    <span className="expected-label">Correct answer</span>
+                    {question.correct}) {question.options[question.correct]}
+                  </p>
                 </div>
                 <div className="fact">
                   <p className="fact-label">Fact</p>
                   <p className="fact-body">{question.fact}</p>
                 </div>
                 <button type="button" className="btn btn-primary" onClick={goNext} autoFocus>
-                  {index >= total - 1 ? 'See results' : 'Continue'}
+                  {index >= total - 1 ? 'See results' : 'Next question'}
                 </button>
               </div>
             )}
@@ -192,7 +187,7 @@ export default function App() {
               <span className="score-pct"> ({Math.round((score / total) * 100)}%)</span>
             </p>
             <p className="results-lead">
-              Review any misses below, then take another pass to lock in the facts for competition day.
+              Review any misses below, then take another pass — questions will shuffle again.
             </p>
             <div className="cta-row">
               <button type="button" className="btn btn-primary" onClick={startQuiz}>
@@ -211,9 +206,13 @@ export default function App() {
                         Q{q.id}. {q.question}
                       </p>
                       <p className="miss-yours">
-                        Your answer: <em>{r.userAnswer || '—'}</em>
+                        Your answer: <em>
+                          {r.selected}) {q.options[r.selected]}
+                        </em>
                       </p>
-                      <p className="miss-ans">Answer: {q.answer}</p>
+                      <p className="miss-ans">
+                        Correct: {q.correct}) {q.options[q.correct]}
+                      </p>
                       <p className="miss-fact">{q.fact}</p>
                     </li>
                   )
